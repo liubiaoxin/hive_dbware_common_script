@@ -44,27 +44,27 @@ function  load_bussiness_data_to_hive(){
 	impala-shell -i BJ-HOST-115 -q "REFRESH ${schema}.$table_name;"
 }
 
-#抽取bds层数据到mds
-function  load_bds_data_to_mds(){
+#通过sql insert方式加载hive表数据到不同shema层
+function  load_hive_data_to_schema(){
 	#business_type
 	business_type=$1
-	echo "load_bds_data_to_mds:business_type=$business_type"
+	echo "load_hive_data_to_schema:business_type=$business_type"
 	
 	#schema
 	schema=$2
-	echo "load_bds_data_to_mds:schema=$schema"
+	echo "load_hive_data_to_schema:schema=$schema"
 	
 	#table_name
 	table_name=$3
-	echo "load_bds_data_to_mds:table_name=$table_name"
+	echo "load_hive_data_to_schema:table_name=$table_name"
 	
 	#s_date
 	s_date=$4
-	echo "load_bds_data_to_mds:s_date=$s_date"
+	echo "load_hive_data_to_schema:s_date=$s_date"
 	
 	#m_date
 	m_date=$5
-	echo "load_bds_data_to_mds:m_date=$m_date"
+	echo "load_hive_data_to_schema:m_date=$m_date"
 
 	#删除已存在的表分区、目录
 	#echo "hive -e \"alter table ${schema}.$table_name drop IF EXISTS partition(dt='${s_date}');\""
