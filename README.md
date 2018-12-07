@@ -1,2 +1,2 @@
 # dataware_common_script
-数据仓库公共脚本封装
+hive数据仓库数据抽取公共脚本封装
