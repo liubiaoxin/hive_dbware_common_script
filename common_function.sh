@@ -44,27 +44,33 @@ function  load_bussiness_data_to_hive(){
 	impala-shell -i BJ-HOST-115 -q "REFRESH ${schema}.$table_name;"
 }
 
-#通过sql insert方式加载hive表数据到不同shema层
-function  load_hive_data_to_schema(){
+#抽取bds层数据到mds
+function  load_bds_data_to_mds(){
 	#business_type
 	business_type=$1
-	echo "load_hive_data_to_schema:business_type=$business_type"
+	echo "load_bds_data_to_mds:business_type=$business_type"
 	
 	#schema
 	schema=$2
-	echo "load_hive_data_to_schema:schema=$schema"
+	echo "load_bds_data_to_mds:schema=$schema"
 	
 	#table_name
 	table_name=$3
-	echo "load_hive_data_to_schema:table_name=$table_name"
+	echo "load_bds_data_to_mds:table_name=$table_name"
 	
 	#s_date
 	s_date=$4
-	echo "load_hive_data_to_schema:s_date=$s_date"
+	echo "load_bds_data_to_mds:s_date=$s_date"
 	
 	#m_date
 	m_date=$5
-	echo "load_hive_data_to_schema:m_date=$m_date"
+	echo "load_bds_data_to_mds:m_date=$m_date"
+	
+	#partition_name
+	partition_name=$6
+	partition_name=${partition_name:='dt'}
+	echo "load_bds_data_to_mds:partition_name=$partition_name"
+	
 
 	#删除已存在的表分区、目录
 	#echo "hive -e \"alter table ${schema}.$table_name drop IF EXISTS partition(dt='${s_date}');\""
@@ -72,8 +78,54 @@ function  load_hive_data_to_schema(){
 	#hdfs dfs -rm -r  /qding/db/${schema}/$table_name/dt=$s_date
 
 	#替换s_date成具体数据日期
-	sed "s/s_date/${s_date}/g" /data/qding_etl/sql/${schema}/${business_type}/${table_name}.sql >/data/qding_etl/sql/${schema}/${business_type}/${table_name}.sql.tmp
-	sed -i "s/m_date/${m_date}/g"  /data/qding_etl/sql/${schema}/${business_type}/${table_name}.sql.tmp
+	temp_sql=/data/qding_etl/sql/${schema}/${business_type}/${table_name}.sql.tmp
+	sed "s/s_date/${s_date}/g" /data/qding_etl/sql/${schema}/${business_type}/${table_name}.sql >$temp_sql
+	
+	sed -i "s/m_date/${m_date}/g"  $temp_sql
+	
+	#使用tez引擎
+	sed "1 iset hive.exec.compress.output=true;" -i $temp_sql
+	sed "1 iset mapred.output.compress=true;" -i $temp_sql
+	sed "1 iset mapred.output.compression.codec=org.apache.hadoop.io.compress.GzipCodec;" -i $temp_sql	
+	
+	sed "1 iset hive.vectorized.execution.enabled = false;" -i $temp_sql
+	sed "1 iset hive.execution.engine = tez;" -i $temp_sql
+	sed "1 iset tez.queue.name=root.bigdata;" -i $temp_sql
+	
+	#处理包含union的sql，导致tez产生子目录问题，执行完sql之后，在overwrite一下
+	grep -i "union"  $temp_sql
+	if [ $? -ne 0 ]; then
+	     echo "$temp_sql do not contain 'union',skip!!!!"
+	else
+	
+	     echo "$temp_sql contain 'union',special deal with sql!!!"
+		 
+		 partition_name=$(echo `hive -e "show create table  ${schema}.${table_name};"  | xargs` | awk '{match($0,/(.*PARTITIONED BY.*\(.*`(.*)`.*string.*\).*)/,b);print b[2]}');
+		 echo "${schema}.${table_name} partition_name======$partition_name"
+
+		 if [ "$partition_name" = "year_month" ]; then
+		    s_date=${s_date:0:7}
+		 fi
+		 
+		 partition_sql_str=""
+		 where_sql_str=""
+		 fields_sql_str="*"
+		 if [ "$partition_name" = "" ]; then
+               echo "partition_name  is null!!!!"
+		 else 
+		    partition_sql_str="PARTITION(${partition_name}='${s_date}')"
+			where_sql_str="where ${partition_name}='${s_date}'"
+			fields_sql_str="\`(${partition_name})\?\+\.\+\`"
+         fi
+		 
+		 insert_sql="INSERT OVERWRITE TABLE ${schema}.${table_name} $partition_sql_str select $fields_sql_str from ${schema}.${table_name} $where_sql_str;"
+		 echo "insert_sql===================$insert_sql"
+
+	     sed "$ a;" -i $temp_sql
+		 sed "$ aset hive.support.quoted.identifiers=None;" -i $temp_sql
+		 sed "$ a$insert_sql" -i $temp_sql
+		  
+	fi
 
 	#执行hive sql文件
 	echo "hive  -f  /data/qding_etl/sql/${schema}/${business_type}/${table_name}.sql.tmp"
@@ -124,6 +176,10 @@ function  load_ads_data_to_db(){
 	s_date=$4
 	echo "load_ads_data_to_db:s_date=$s_date"
 	
+	#partition_name
+	partition_name=$(echo `hive -e "show create table  ${schema}.${table_name};"  | xargs` | awk '{match($0,/(.*PARTITIONED BY.*\(.*`(.*)`.*string.*\).*)/,b);print b[2]}');
+	echo "load_ads_data_to_db:${schema}.${table_name} partition_name======$partition_name"
+	
 	#datax_home path
 	datax_home=/data/datax/
 	
@@ -138,7 +194,7 @@ function  load_ads_data_to_db(){
 	echo "run_job=======${run_job}"
 	
 	#data_path
-	dt_path=/qding/db/$schema/$table_name/dt=$s_date
+	dt_path=/qding/db/$schema/$table_name/$partition_name=$s_date
 	echo "data_path=======$dt_path"
 	
 	#judge path  exist
